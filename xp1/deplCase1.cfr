@@ -1,0 +1,136 @@
+/*
+Clafer model Allocation Case Study - ISC2 project
+Authors : Jerome Le Noir (TRT), Stephen Creff (IRT SystemX)
+Licence EPLv2.0
+*/
+
+/********************************************
+*			Data-flow modeling				*
+*********************************************/
+abstract ProcFunction		//Processing Function
+ execTime -> integer		//performance
+  [this.ref >= 0]
+ deployedFTo -> Processor	//resolution problem variable C2, C3
+  [parent in this.allocatedTo]
+
+/********************************************
+*			Hardware modeling				*
+*********************************************/
+abstract Processor			//Processor
+ maxloadusage -> integer	//max capacity
+  [this.ref >= 0]
+ totalExecTimebyP -> integer	//current load
+  [this.ref >= 0] 
+ [totalExecTimebyP < maxloadusage]
+ 
+ allocatedTo -> ProcFunction 0..17	//resolution problem variable
+  [this.deployedFTo = parent]
+
+ hostedBy -> Board					//contained in a board
+  [parent in this.localProcessors]
+     
+abstract FPGAProcessor : Processor	//FPGA specialization processor
+ [maxloadusage = 6650]
+ [allocatedTo in mydataFlowArchitecture.localFPGAFunctions]
+ [totalExecTimebyP = sum allocatedTo.execTime] 
+ 
+abstract GPPProcessor : Processor	//GPP specialization processor
+ [maxloadusage = 12000] 
+ [allocatedTo in mydataFlowArchitecture.localGPPFunctions]
+ [totalExecTimebyP = sum allocatedTo.execTime] 
+
+abstract GPUProcessor : Processor	//GPGPU specialization processor
+ [maxloadusage = 5600]
+ [allocatedTo in mydataFlowArchitecture.localGPUFunctions]
+ [totalExecTimebyP = sum allocatedTo.execTime] 
+
+abstract Board						//Board
+ gpp : GPPProcessor
+ gpu : GPUProcessor
+ fpga : FPGAProcessor ? 			//optional FPGA
+ localProcessors -> Processor *
+  [this.hostedBy = parent]
+ [localProcessors = this.gpp, this.gpu, this.fpga]
+
+/********************************************
+*		Software - Data-flow model			*
+*********************************************/
+abstract SubsystemFunctionalArchitecture
+ A1 : ProcFunction
+  [execTime = 2500]
+ A2 : ProcFunction
+  [execTime = 1500]
+ B1 : ProcFunction
+  [execTime = 2870]
+  
+ C1 : ProcFunction
+  [execTime = 1400]
+
+ C20 : ProcFunction
+  [execTime = 4300]
+  
+ C21 : ProcFunction
+  [execTime = 5500]
+  
+ C30 : ProcFunction
+  [execTime = 4350]
+  
+ C31 : ProcFunction
+  [execTime = 6100]
+
+ C4 : ProcFunction
+  [execTime = 100]
+    
+ E2 : ProcFunction
+  [execTime = 1000]
+  
+ E1 : ProcFunction
+  [execTime = 1250]
+
+ D1 : ProcFunction
+  [execTime = 2000]
+
+ D2 : ProcFunction
+  [execTime = 900]  
+  
+ F1 : ProcFunction
+  [execTime = 8000]  
+ 
+ C5 : ProcFunction
+  [execTime = 7000] 
+ 
+ F2 : ProcFunction
+  [execTime = 8000] 
+
+ F3 : ProcFunction
+  [execTime = 5000]     
+   
+ localFPGAFunctions -> ProcFunction 4..4
+ [localFPGAFunctions = B1,C1,E1,D1]
+ 
+ localGPUFunctions -> ProcFunction 2..2
+ [localGPUFunctions = C20,C21] 
+ 
+ localGPPFunctions -> ProcFunction 11..11
+ [localGPPFunctions = C30,C31,C4,E2,D2,F1,C5,F2,F3,A1,A2]
+
+/********************************************
+*		Hardware settings       			*
+*********************************************/
+abstract HardwareArchitecture
+ board0 : Board
+  [no fpga] 
+ board1 : Board
+  [no fpga]
+ board2 : Board
+  [fpga]
+ board3 : Board 
+  [fpga]
+
+/********************************************
+*		 	Application case study 			*
+*********************************************/ 
+Architecture 
+ myArchitecture : HardwareArchitecture 
+ mydataFlowArchitecture : SubsystemFunctionalArchitecture 
+

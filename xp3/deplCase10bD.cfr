@@ -1,0 +1,483 @@
+/*
+Clafer model Allocation Case Study - ISC2 project
+Authors : Jerome Le Noir (TRT), Stephen Creff (IRT SystemX)
+Licence EPLv2.0
+*/
+
+/********************************************
+*			Branching Priority				*
+*********************************************/
+[choco|
+branchingPriority([[c0_deployedFTo]]);
+|]
+
+/********************************************
+*			Data-flow modeling				*
+*********************************************/
+abstract ProcFunction           //Processing Function
+ execTime -> integer            //performance
+  [this.ref >= 0]
+ deployedFTo -> Processor       //resolution problem variable C2, C3
+  [parent in this.allocatedTo]
+    
+abstract FPGAFunction : ProcFunction   //FPGA specialization function
+ [deployedFTo in FPGAProcessor] //reference specialization C1
+    
+abstract GPUFunction : ProcFunction    //GPGPU specialization function
+  [deployedFTo in GPUProcessor] //C1
+  
+abstract GPPFunction : ProcFunction    //GPP specialization function 
+ [deployedFTo in GPProcessor] // C1
+
+abstract AFConnector
+ src -> ProcFunction 
+ dest -> ProcFunction
+  
+ tokenSize -> integer
+  [this.ref >= 0] 
+ penEthernet -> integer
+  [this.ref >= 0] 
+ penalite_gpu -> integer
+  [this.ref >= 0]
+  
+  
+ deployedTo -> Ethernet ?
+  [parent in this.deployedAFConnectors  ]
+  
+abstract GPxAFConnector : AFConnector
+abstract GPuAFConnector : GPxAFConnector 
+abstract FPGAFPGAAFConnector : AFConnector 
+abstract FPGAAFConnector : AFConnector 
+  
+/********************************************
+*			Hardware modeling				*
+*********************************************/   
+abstract Processor              //Processor
+ maxloadusage -> integer        //max capacity
+  [this.ref >= 0]
+ totalExecTimebyP -> integer    //current load
+  [this.ref >= 0] 
+ [totalExecTimebyP < maxloadusage]
+ 
+ allocatedTo -> ProcFunction *  //resolution problem variable
+  [this.deployedFTo = parent]
+ 
+ hostedBy -> Board              //contained in a board
+  [parent in this.processors]
+     
+abstract FPGAProcessor : Processor
+ [maxloadusage = 6650]
+ [totalExecTimebyP = sum allocatedTo.execTime] 
+
+abstract GPUProcessor : Processor
+ [maxloadusage = 5600]
+ [totalExecTimebyP = sum allocatedTo.execTime] 
+ 
+abstract GPPProcessor : Processor
+ maxload -> integer = 140 
+ maxusage -> integer = 75
+   
+abstract Board
+ fpga : FPGAProcessor ? 
+ gpu : GPUProcessor
+ gpp : GPPProcessor
+ pci : PCI 
+ localProcessors -> Processor *
+  [this.hostedBy = parent]
+ [localProcessors = this.gpp, this.gpu, this.fpga]
+
+ outEthernetWireConnectors -> Ethernet *
+ inEthernetWireConnectors -> Ethernet *
+
+
+ sameBoardGpxGpxConnectors -> GPuAFConnector *
+ [all afc1 : GPuAFConnector | (afc1 in sameBoardGpxGpxConnectors) <=> afc1.src.deployedFTo.ref = this.gpu && afc1.dest.deployedFTo.ref = this.gpp]
+
+ gpuOnBoardPenality -> integer
+  [this.ref >= 0]
+ [gpuOnBoardPenality = (if sameBoardGpxGpxConnectors then sum sameBoardGpxGpxConnectors.penalite_gpu else 0)]
+
+abstract GPxBoard : Board
+ [no fpga]
+ [gpp.maxloadusage = 21000]
+ 
+ [pci.currentload = (if sameBoardGpxGpxConnectors then sum sameBoardGpxGpxConnectors.tokenSize else 0)]
+ 
+ outEthernetPen -> integer
+  [this.ref >= 0]
+ [outEthernetPen = sum this.outEthernetWireConnectors.deployedAFConnectors.penEthernet]
+
+ inGPpGPuEthernetPen -> integer
+  [this.ref >= 0]
+ [inGPpGPuEthernetPen =  sum this.inEthernetWireConnectors.deployedAFConnectors.penEthernet ]
+
+ 																						     
+ [gpp.totalExecTimebyP = sum gpp.allocatedTo.execTime + outEthernetPen + inGPpGPuEthernetPen + gpuOnBoardPenality  ] 
+ 
+
+abstract FPGABoard : Board
+ [fpga]
+
+ [pci.currentload = (if sameBoardGpxGpxConnectors then sum sameBoardGpxGpxConnectors.tokenSize else 0) + pciPen]
+
+ IBC1fpgafpgaConnectors -> FPGAFPGAAFConnector *  
+ [all afc : FPGAFPGAAFConnector | (afc in IBC1fpgafpgaConnectors) <=> ( afc.dest.deployedFTo.ref = this.fpga  && afc.src.deployedFTo.ref != this.fpga  )]
+
+ IBC1fpgafpga -> integer
+  [this.ref >= 0]
+ [IBC1fpgafpga = (if IBC1fpgafpgaConnectors then #IBC1fpgafpgaConnectors * 1000 else 0)] 
+
+ board3IBCfpgagpxConnectors -> FPGAAFConnector *  
+ [all afc : FPGAAFConnector | (afc in board3IBCfpgagpxConnectors) <=> ((afc.src.deployedFTo.ref = this.fpga) && (afc.dest.deployedFTo.ref != this.gpp) && (afc.dest.deployedFTo.ref != this.gpu) )]
+  		
+ fpaIBCDestGpx -> integer	
+  [this.ref >= 0]	
+ [fpaIBCDestGpx = (if board3IBCfpgagpxConnectors then #board3IBCfpgagpxConnectors * (2500) else 0)] 	//
+  
+
+ globalGPPTimePenality -> integer
+  [this.ref >= 0]
+ [globalGPPTimePenality =  gpuOnBoardPenality  + b3lc2TimePen + IBC1fpgafpga + IBCthisGpxSRCfpgav1 + bpenEthernet + IBC1fpgafpgaSrc + destGPpGPuPenEthernet + fpaIBCDestGpx]
+ 
+ destIBCGppGpuConnectors -> GPxAFConnector *  
+ [all afc : GPxAFConnector | (afc in destIBCGppGpuConnectors) <=> (afc.dest.deployedFTo.hostedBy.ref = this && afc.src.deployedFTo.hostedBy.ref != this)]
+ destGPpGPuPenEthernet -> integer
+  [this.ref >= 0]
+ [destGPpGPuPenEthernet = (if destIBCGppGpuConnectors then sum destIBCGppGpuConnectors.penEthernet  else 0) ]
+
+
+ boardIBCGppGpuConnectors -> GPxAFConnector *  
+ [all afc : GPxAFConnector | (afc in boardIBCGppGpuConnectors) <=> (afc.src.deployedFTo.hostedBy.ref = this && afc.dest.deployedFTo.hostedBy.ref != this)]
+
+ bpenEthernet -> integer
+  [this.ref >= 0]
+ [bpenEthernet = ( if boardIBCGppGpuConnectors then sum boardIBCGppGpuConnectors.penEthernet  else 0 )]   
+
+ FpgaTenPercentPen -> integer
+  [this.ref >= 0]
+ [FpgaTenPercentPen =   sum fpga.allocatedTo.execTime / 10 ] 
+
+
+ IBC1fpgafpgaSrcConnectors -> FPGAFPGAAFConnector *  
+ [all afc : FPGAFPGAAFConnector | (afc in IBC1fpgafpgaSrcConnectors) <=> ( (afc.src.deployedFTo.ref = this.fpga) && (afc.dest.deployedFTo.ref != this.fpga)  )]
+ 
+
+ IBC1fpgafpgaSrc -> integer
+  [this.ref >= 0]
+ [IBC1fpgafpgaSrc = (if IBC1fpgafpgaSrcConnectors then #IBC1fpgafpgaSrcConnectors * 1000 else 0)] 
+
+
+ LocalfpgagpxConnectors -> FPGAAFConnector *  
+ [all afc : FPGAAFConnector | (afc in LocalfpgagpxConnectors) <=>  ((afc.src.deployedFTo.ref = this.fpga) && ((afc.dest.deployedFTo.ref = this.gpp)||(afc.dest.deployedFTo.ref = this.gpu)))]
+
+ b3lc2TimePen -> integer
+  [this.ref >= 0]
+ [b3lc2TimePen = (if LocalfpgagpxConnectors then #LocalfpgagpxConnectors * 1000 else 0)]
+
+ pciPen -> integer
+  [this.ref >= 0]
+ [pciPen = (if LocalfpgagpxConnectors then sum LocalfpgagpxConnectors.tokenSize else 0)]
+
+
+ boardIBCthisGpxSRCfpgaConnectorsv1 -> FPGAAFConnector *  
+ [all afc : FPGAAFConnector | (afc in boardIBCthisGpxSRCfpgaConnectorsv1) <=> afc.src.deployedFTo.ref != this.fpga  && (afc.dest.deployedFTo.ref = this.gpp || afc.dest.deployedFTo.ref = this.gpu) ]
+  
+ IBCthisGpxSRCfpgav1 -> integer
+  [this.ref >= 0]
+ [IBCthisGpxSRCfpgav1 = (if boardIBCthisGpxSRCfpgaConnectorsv1 then sum boardIBCthisGpxSRCfpgaConnectorsv1.penEthernet  else 0)]
+ 
+ [gpp.totalExecTimebyP = sum gpp.allocatedTo.execTime + globalGPPTimePenality + FpgaTenPercentPen ] 
+
+/********************************************
+*		Software - Data-flow model			*
+*********************************************/  
+abstract SubsystemFunctionalArchitecture
+
+ B1 : FPGAFunction
+  [execTime = 2870]
+  
+ C1 : FPGAFunction
+  [execTime = 1400]
+
+ E1 : FPGAFunction
+  [execTime = 1250]
+
+ D1 : FPGAFunction
+  [execTime = 2000]
+  
+ C20 : GPUFunction
+  [execTime = 4300]
+    
+ C21 : GPUFunction
+  [execTime = 5500]
+  
+ C30 : GPPFunction
+  [execTime = 4350]
+  
+ C31 : GPPFunction
+  [execTime = 6100]
+
+ C5 : GPPFunction
+  [execTime = 7000] 
+  
+ F1 : GPPFunction
+  [execTime = 8000]  
+
+ 
+ F2 : GPPFunction
+  [execTime = 8000] 
+
+ F3 : GPPFunction
+  [execTime = 5000]     
+ 
+
+  
+ A1 : GPPFunction
+  [execTime = 2500]
+ A2 : GPPFunction
+  [execTime = 1500]
+
+ D2 : GPPFunction
+  [execTime = 900]  
+
+ C4 : GPPFunction
+  [execTime = 100]
+    
+ E2 : GPPFunction
+  [execTime = 1000]
+
+
+
+ A1A2 : GPxAFConnector
+  [src = A1]
+  [dest = A2]
+  [tokenSize = 50] 
+  [penEthernet = 91]
+  [penalite_gpu = 33] 
+ A2C5 : GPxAFConnector
+  [src = A2]
+  [dest = C5]
+  [tokenSize = 246] 
+  [penEthernet = 444]
+  [penalite_gpu = 162] 
+
+ B1D1 : FPGAFPGAAFConnector
+  [src = B1]
+  [dest = D1]
+  [tokenSize = 523] 
+  [penEthernet = 943]
+  [penalite_gpu = 346] 
+ D1D2 : FPGAAFConnector
+  [src = D1]
+  [dest = D2]
+  [tokenSize = 492]   
+  [penEthernet = 887]
+  [penalite_gpu = 324]   
+ D2F1 : GPxAFConnector
+  [src = D2]
+  [dest = F1]
+  [tokenSize = 100]   
+  [penEthernet = 181]
+  [penalite_gpu = 66] 
+ C4C5 : GPxAFConnector
+  [src = C4]
+  [dest = C5]
+  [tokenSize = 36]   
+  [penEthernet = 65]
+  [penalite_gpu = 66]      
+ C5F1 : GPxAFConnector
+  [src = C5]
+  [dest = F1]
+  [tokenSize = 120]   
+  [penEthernet = 216]
+  [penalite_gpu = 24]
+
+ F1F2 : GPxAFConnector
+  [src = F1]
+  [dest = F2]
+  [tokenSize = 120]   
+  [penEthernet = 216]
+  [penalite_gpu = 24] 
+ F2F3 : GPxAFConnector
+  [src = F2]
+  [dest = F3]
+  [tokenSize = 120]   
+  [penEthernet = 216]
+  [penalite_gpu = 24]     
+    
+ B1C1 : FPGAFPGAAFConnector
+  [src = B1]
+  [dest = C1]
+  [tokenSize = 523] 
+  [penEthernet = 943]
+  [penalite_gpu = 346] 
+
+ B1E1 : FPGAFPGAAFConnector
+  [src = B1]
+  [dest = E1]
+  [tokenSize = 523] 
+  [penEthernet = 943]
+  [penalite_gpu = 346] 
+ E1E2 : FPGAAFConnector
+  [src = E1]
+  [dest = E2]
+  [tokenSize = 523] 
+  [penEthernet = 943]
+  [penalite_gpu = 346]   
+ E2C4 : GPxAFConnector
+  [src = E2]
+  [dest = C4]
+  [tokenSize = 110] 
+  [penEthernet = 199]
+  [penalite_gpu = 73]  
+ C1C20 : FPGAAFConnector
+  [src = C1]
+  [dest = C20]
+  [tokenSize = 492]   
+  [penEthernet = 887]
+  [penalite_gpu = 324]  
+ C1C21 : FPGAAFConnector
+  [src = C1]
+  [dest = C21]
+  [tokenSize = 492]   
+  [penEthernet = 887]
+  [penalite_gpu = 324]
+      
+ C20C30 : GPuAFConnector
+  [src = C20]
+  [dest = C30]         
+  [tokenSize = 984]   
+  [penEthernet = 1774]
+  [penalite_gpu = 647]    
+ C21C31 : GPuAFConnector
+  [src = C21]
+  [dest = C31]
+  [tokenSize = 984]   
+  [penEthernet = 1774]
+  [penalite_gpu = 647]  
+ C30C4 : GPxAFConnector
+  [src = C30]
+  [dest = C4]
+  [tokenSize = 16]   
+  [penEthernet = 29]
+  [penalite_gpu = 10]  
+ C31C4 : GPxAFConnector
+  [src = C31]
+  [dest = C4]
+  [tokenSize = 16]    
+  [penEthernet = 29]
+  [penalite_gpu = 10]
+
+/********************************************
+*		Hardware settings       			*
+*********************************************/
+
+abstract WireConnection
+
+ maxload -> integer
+  [this.ref >= 0]
+ maxusage -> integer
+  [this.ref >= 0]
+ currentBWBytesPerMs -> integer
+  [this.ref >= 0]
+ maxloadusage -> integer
+  [this.ref >= 0]
+ currentload -> integer
+  [this.ref >= 0]
+ [currentload < maxloadusage] 
+ 
+abstract PCI  : WireConnection
+ [maxload = 5714285 ]
+ [maxusage = 95]
+ [maxloadusage = 5428]
+ [currentBWBytesPerMs = 760000 ]
+
+ 
+abstract Ethernet  : WireConnection
+ src2 -> Board
+ dest2 -> Board
+ [src2.ref != dest2.ref]
+ 
+ [maxload = 892857]
+ [maxusage = 95]
+ [maxloadusage = 848]
+ [currentBWBytesPerMs = 118750]
+ deployedAFConnectors -> AFConnector *  
+  [this.deployedTo = parent]
+ [all afc : AFConnector | (afc in deployedAFConnectors) <=> ( afc.src.deployedFTo.hostedBy.ref = src2.ref &&  afc.dest.deployedFTo.hostedBy.ref = dest2.ref ) &&   (!( ( afc.src.deployedFTo.ref = src2.fpga) &&  ( afc.dest.deployedFTo.ref = dest2.fpga   ) ) )   ]
+ [currentload = (if deployedAFConnectors then sum deployedAFConnectors.tokenSize  else 0)]
+
+abstract HardwareArchitecture
+  
+ board0 : GPxBoard
+  [outEthernetWireConnectors =  b0b2, b0b3,b0b1]
+  [inEthernetWireConnectors =   b2b0,b3b0,b1b0] 
+  
+ board1 : GPxBoard
+  [outEthernetWireConnectors = b1b0, b1b2, b1b3]
+  [inEthernetWireConnectors = b0b1,b2b1,b3b1]
+  
+ board2 : FPGABoard
+  [outEthernetWireConnectors = b2b0, b2b3,b2b0]
+  [inEthernetWireConnectors =  b3b2,b0b2,b1b2]
+
+  [gpp.maxloadusage = gpp.maxload *  gpp.maxusage]
+  
+
+ board3 : FPGABoard 
+  [outEthernetWireConnectors = b3b2,b3b1,b3b0]
+  [inEthernetWireConnectors =  b2b3,b0b3,b1b3]  
+
+  [gpp.maxloadusage = gpp.maxload *  gpp.maxusage]
+
+ b0b1 : Ethernet
+  [src2 = board0]  
+  [dest2 = board1]  
+ b0b2 : Ethernet
+  [src2 = board0]
+  [dest2 = board2]  
+ b0b3 : Ethernet
+  [src2 = board0]
+  [dest2 = board3]  
+
+ b1b0 : Ethernet
+  [src2 = board1]
+  [dest2 = board0]  
+
+ b1b2 : Ethernet
+  [src2 = board1]
+  [dest2 = board2]  
+
+ b1b3 : Ethernet
+  [src2 = board1]
+  [dest2 = board3]  
+
+ b2b3 : Ethernet
+  [src2 = board2]
+  [dest2 = board3]  
+
+ b2b0 : Ethernet
+  [src2 = board2]
+  [dest2 = board0]  
+
+ b2b1 : Ethernet
+  [src2 = board2]
+  [dest2 = board1]  
+
+ b3b2 : Ethernet
+  [src2 = board3]
+  [dest2 = board2]
+ b3b0 : Ethernet
+  [src2 = board3]
+  [dest2 = board0]
+ b3b1 : Ethernet
+  [src2 = board3]
+  [dest2 = board1]
+
+/********************************************
+*		 	Application case study 			*
+*********************************************/   
+Architecture 
+ myArchitecture : HardwareArchitecture 
+ mydataFlowArchitecture : SubsystemFunctionalArchitecture 
+

@@ -1,0 +1,137 @@
+/*
+Clafer model Allocation Case Study - ISC2 project
+Authors : Jerome Le Noir (TRT), Stephen Creff (IRT SystemX)
+Licence EPLv2.0
+*/
+
+/********************************************
+*			Data-flow modeling				*
+*********************************************/
+abstract ProcFunction
+ execTime -> integer
+  [this.ref >= 0]
+    
+abstract FPGAFunction : ProcFunction
+ deployedToFPGA -> FPGAProcessor
+  [parent in this.allocatedToFPGA] 
+
+abstract GPUFunction : ProcFunction
+ deployedToGPU -> GPUProcessor
+  [parent in this.allocatedToGPU]
+  
+abstract GPPFunction : ProcFunction
+ deployedToGPP -> GPPProcessor
+  [parent in this.allocatedToGPP]  
+
+/********************************************
+*			Hardware modeling				*
+*********************************************/  
+abstract Processor
+ maxloadusage -> integer
+  [this.ref >= 0]
+ totalExecTimebyP -> integer
+  [this.ref >= 0] 
+ [totalExecTimebyP < maxloadusage]
+
+ hostedBy -> Board
+  [parent in this.localProcessors]
+     
+abstract FPGAProcessor : Processor
+ [maxloadusage = 6650]
+ allocatedToFPGA -> FPGAFunction *
+  [this.deployedToFPGA = parent]
+ [totalExecTimebyP = sum allocatedToFPGA.execTime] 
+
+abstract GPUProcessor : Processor
+ [maxloadusage = 5600]
+ allocatedToGPU -> GPUFunction *
+  [this.deployedToGPU = parent]
+ [totalExecTimebyP = sum allocatedToGPU.execTime] 
+ 
+abstract GPPProcessor : Processor
+ [maxloadusage = 12000] 
+ allocatedToGPP -> GPPFunction *
+  [this.deployedToGPP = parent]
+ [totalExecTimebyP = sum allocatedToGPP.execTime] 
+
+abstract Board
+ gpu : GPUProcessor
+ fpga : FPGAProcessor ? 
+ gpp : GPPProcessor
+ localProcessors -> Processor *
+  [this.hostedBy = parent]
+ [localProcessors = this.gpu, this.fpga,this.gpp]
+
+/********************************************
+*		Software - Data-flow model			*
+*********************************************/
+abstract SubsystemFunctionalArchitecture
+ A1 : GPPFunction
+  [execTime = 2500]
+ A2 : GPPFunction
+  [execTime = 1500]
+ B1 : FPGAFunction
+  [execTime = 2870]
+  
+ C1 : FPGAFunction
+  [execTime = 1400]
+
+ C20 : GPUFunction
+  [execTime = 4300]
+  
+ C21 : GPUFunction
+  [execTime = 5500]
+  
+ C30 : GPPFunction
+  [execTime = 4350]
+  
+ C31 : GPPFunction
+  [execTime = 6100]
+
+ C4 : GPPFunction
+  [execTime = 100]
+    
+ E2 : GPPFunction
+  [execTime = 1000]
+  
+ E1 : FPGAFunction
+  [execTime = 1250]
+
+ D1 : FPGAFunction
+  [execTime = 2000]
+
+ D2 : GPPFunction
+  [execTime = 900]  
+  
+ F1 : GPPFunction
+  [execTime = 8000]  
+ 
+ C5 : GPPFunction
+  [execTime = 7000] 
+ 
+ F2 : GPPFunction
+  [execTime = 8000] 
+
+ F3 : GPPFunction
+  [execTime = 5000]     
+
+/********************************************
+*		Hardware settings       			*
+*********************************************/
+abstract HardwareArchitecture
+ board2 : Board
+  [fpga]
+ board3 : Board 
+  [fpga]
+ board0 : Board
+  [no fpga] 
+ board1 : Board
+  [no fpga]
+
+/********************************************
+*		 	Application case study 			*
+*********************************************/ 
+Architecture 
+ myArchitecture : HardwareArchitecture 
+ mydataFlowArchitecture : SubsystemFunctionalArchitecture 
+
